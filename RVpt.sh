@@ -12,8 +12,8 @@ fi
 # 设置参数
 GENOME_DIR="$1"
 OUTPUT_DIR="$2"
-SCRIPT_PATH="/home/lijianhai/RESpt/RESpt.py"  # 修改为RESpt.py的实际路径
-THREADS=20  # 设置线程数
+SCRIPT_PATH="/home/lijianhai/RVpt/RVpt.py"  # 修改为RESpt.py的实际路径
+THREADS=56  # 设置线程数
 
 # 检查目录是否存在
 if [ ! -d "$GENOME_DIR" ]; then

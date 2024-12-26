@@ -96,11 +96,12 @@ class GenomeAnalyzer:
         self.subject_fasta_ISTnIN = self.db_dir / 'ISTnIN/istnin.fas'
         self.subject_fasta_RESfinder = self.db_dir / 'RESfinder/resfinder.fas'
         self.subject_fasta_VFDB = self.db_dir / 'VFDB/vfdb.fas'
-        
+        self.subject_fasta_ICE = self.db_dir / 'ICE/ICE.fas'
         # Output file paths
         self.output_file_ISTnIN = self.outdir / 'ISTnIN.tsv'
         self.output_file_RESfinder = self.outdir / 'RESfinder.tsv'
         self.output_file_VFDB = self.outdir / 'VFDB.tsv'
+        self.output_file_ICE = self.outdir / 'ICE.tsv'
         
         # Platon database path
         self.platon_db = Path(platon_db) if platon_db else self.db_dir / 'platon'
@@ -316,11 +317,11 @@ class GenomeAnalyzer:
                 try:
                     # Read the original PhiSpy output
                     phage_df = pd.read_csv(prophage_file, sep='\t', header=None,
-                        names=['type', 'contig', 'start', 'end', 'attL_start', 'attL_end',
+                        names=['Prophage number', 'contig', 'start', 'end', 'attL_start', 'attL_end',
                               'attR_start', 'attR_end', 'attL_seq', 'attR_seq', 'att_explanation'])
                     
                     # Select and reorder columns for summary
-                    summary_df = phage_df[['contig', 'start', 'end', 'type']]
+                    summary_df = phage_df[['contig', 'start', 'end', 'Prophage number']]
                     
                     # Save formatted version
                     output_file = self.outdir / 'phispy_results_summary.tsv'
@@ -381,7 +382,7 @@ class GenomeAnalyzer:
         
         return gene_locations
 
-    def add_genome_locations(self, blast_file, gff_file, output_file, is_istnin=False):
+    def add_genome_locations(self, blast_file, gff_file, output_file):
         """Add genome location information to BLAST results"""
         # Read BLAST results
         blast_df = pd.read_csv(blast_file, sep='\t')
@@ -408,27 +409,11 @@ class GenomeAnalyzer:
         blast_df['genome_end'] = blast_df['query_id'].map(lambda x: get_location(x).get('end'))
         blast_df['strand'] = blast_df['query_id'].map(lambda x: get_location(x).get('strand'))
         
-        # Add type marker if ISTnIN result
-        if is_istnin:
-            def get_element_type(subject_id):
-                if 'ISFinder' in subject_id:
-                    return 'IS'
-                elif 'INTEGRALL' in subject_id:
-                    return 'IN'
-                else:
-                    return 'Tn'
+
             
-            blast_df['element_type'] = blast_df['subject_id'].apply(get_element_type)
-            
-            # Update column order to include element_type
-            columns = [
-                'query_id', 'subject_id', 'identity', 'alignment_length',
-                'query_start', 'query_end', 'query_coverage', 'subject_coverage',
-                'contig', 'genome_start', 'genome_end', 'strand',
-                'evalue', 'bit_score', 'element_type'
-            ]
-        else:
-            columns = [
+
+
+        columns = [
                 'query_id', 'subject_id', 'identity', 'alignment_length',
                 'query_start', 'query_end', 'query_coverage', 'subject_coverage',
                 'contig', 'genome_start', 'genome_end', 'strand',
@@ -452,7 +437,7 @@ class GenomeAnalyzer:
         result_df.to_csv(output_file, sep='\t', index=False)
         print(f"Added genome location information and saved to: {output_file}")
         return result_df
-
+    
     def analyze_resistance_genes_context(self):
         """Analyze genomic context of resistance genes"""
         try:
@@ -461,17 +446,19 @@ class GenomeAnalyzer:
             istnin_file = self.outdir / 'ISTnIN_filtered_with_locations.tsv'
             phage_file = self.outdir / 'phispy_results_summary.tsv'
             plasmid_file = self.outdir / 'platon_results_summary.tsv'
+            ice_file = self.outdir / 'ICE_filtered_with_locations.tsv'
             
             if not all(f.exists() for f in [res_file, istnin_file]):
                 print("Missing required input files")
                 return
             
             # Read files
-            res_df = pd.read_csv(res_file, sep='\t')
-            istnin_df = pd.read_csv(istnin_file, sep='\t')
-            
+            res_df = pd.read_csv(res_file, sep='\t') if res_file.exists() else pd.DataFrame()
+            istnin_df = pd.read_csv(istnin_file, sep='\t') if istnin_file.exists() else pd.DataFrame()
+            ice_df = pd.read_csv(ice_file, sep='\t') if ice_file.exists() else pd.DataFrame()
+            plasmid_df = pd.read_csv(plasmid_file, sep='\t') if plasmid_file.exists() else pd.DataFrame()
             # Read phage file if exists and standardize column names
-            if phage_file.exists():
+            if (phage_file.exists()):
                 phage_df = pd.read_csv(phage_file, sep='\t')
                 # Rename columns to match expected names
                 column_mapping = {
@@ -482,9 +469,7 @@ class GenomeAnalyzer:
                 phage_df = phage_df.rename(columns={v: k for k, v in column_mapping.items()})
             else:
                 phage_df = pd.DataFrame()
-            
-            # Read plasmid file if exists
-            plasmid_df = pd.read_csv(plasmid_file, sep='\t') if plasmid_file.exists() else pd.DataFrame()
+               
             
             # Create results list
             results = []
@@ -525,7 +510,7 @@ class GenomeAnalyzer:
                             res_gene['genome_start'] >= phage['start'] and
                             res_gene['genome_end'] <= phage['end']):
                             result['on_phage'] = 'Yes'
-                            result['mobile_evidence'].append(f"Located in prophage region type: {phage['type']}")
+                            result['mobile_evidence'].append(f"Located in prophage region {phage.get('Prophage number', 'unknown')}")
                             break
 
                 # Check if within transposon range
@@ -535,6 +520,15 @@ class GenomeAnalyzer:
                         res_gene['genome_end'] <= tn['genome_end']):
                         result['in_transposon'] = 'Yes'
                         result['mobile_evidence'].append(f"Located within transposon {tn['subject_id']}")
+                        break
+
+                # Check if within ICE range
+                for _, ice in ice_df.iterrows():
+                    if (res_gene['contig'] == ice['contig'] and
+                        res_gene['genome_start'] >= ice['genome_start'] and
+                        res_gene['genome_end'] <= ice['genome_end']):
+                        result['in_transposon'] = 'Yes'
+                        result['mobile_evidence'].append(f"Located within ICE {ice['subject_id']}")
                         break
                 
                 # Check if within integron range
@@ -642,6 +636,7 @@ class GenomeAnalyzer:
             platon_file = self.outdir / 'platon_results_summary.tsv'
             phispy_file = self.outdir / 'prophage_coordinates.tsv'
             vfdb_parsed_file = self.db_dir / 'VFDB/vfdb_parsed.tsv'  
+            ice_file = self.outdir / 'ICE_filtered_with_locations.tsv'
 
             if not vfdb_file.exists():
                 print("VFDB analysis result file not found")
@@ -651,6 +646,7 @@ class GenomeAnalyzer:
             vfdb_df = pd.read_csv(vfdb_file, sep='\t')
             istnin_df = pd.read_csv(istnin_file, sep='\t') if istnin_file.exists() else pd.DataFrame()
             plasmid_df = pd.read_csv(platon_file, sep='\t') if platon_file.exists() else pd.DataFrame()
+            ice_df = pd.read_csv(ice_file, sep='\t') if ice_file.exists() else pd.DataFrame()
             
             # Read vfdb_parsed.tsv and create ID to Gene_Name mapping
             if vfdb_parsed_file.exists():
@@ -705,7 +701,7 @@ class GenomeAnalyzer:
                             break
                     if in_phage:
                         result['on_phage'] = 'Yes'
-                        result['mobile_evidence'].append(f"Located in prophage region type: {phage['type']}")
+                        result['mobile_evidence'].append(f"Located in prophage region {phage.get('Prophage number', 'unknown')}")
               
                 
                 # Check if on Tn
@@ -715,6 +711,15 @@ class GenomeAnalyzer:
                         vf_gene['genome_end'] <= tn['genome_end']):
                         result['in_transposon'] = 'Yes'
                         result['mobile_evidence'].append(f"Located within transposon {tn['subject_id']}")
+                        break
+                
+                # Check if on ice
+                for _, ice in ice_df.iterrows():
+                    if (vf_gene['contig'] == ice['contig'] and
+                        vf_gene['genome_start'] >= ice['genome_start'] and
+                        vf_gene['genome_end'] <= ice['genome_end']):
+                        result['in_transposon'] = 'Yes'
+                        result['mobile_evidence'].append(f"Located within ICE {ice['subject_id']}")
                         break
                 
                 # Check if on IN
@@ -826,40 +831,45 @@ class GenomeAnalyzer:
         # Run BLAST analysis
         prokka_ffn = self.prokka_dir / f"{Path(self.input_genome).stem}.ffn"
         prokka_gff = self.prokka_dir / f"{Path(self.input_genome).stem}.gff"
+        prokka_fna = self.prokka_dir / f"{Path(self.input_genome).stem}.fna"
         
-        if prokka_ffn.exists() and prokka_gff.exists():
+        if prokka_ffn.exists() and prokka_gff.exists() and prokka_fna.exists():
             # Run BLAST and filter
-            self.run_blast(str(prokka_ffn), str(self.subject_fasta_ISTnIN), str(self.output_file_ISTnIN))
+            self.run_blast(str(prokka_fna), str(self.subject_fasta_ISTnIN), str(self.output_file_ISTnIN))
             self.run_blast(str(prokka_ffn), str(self.subject_fasta_RESfinder), str(self.output_file_RESfinder))
             self.run_blast(str(prokka_ffn), str(self.subject_fasta_VFDB), str(self.output_file_VFDB))
-            
+            self.run_blast(str(prokka_fna), str(self.subject_fasta_ICE), str(self.output_file_ICE))
+
             # Add genome location information
             istnin_filtered = Path(str(self.output_file_ISTnIN).replace('.tsv', '_filtered.tsv'))
             resfinder_filtered = Path(str(self.output_file_RESfinder).replace('.tsv', '_filtered.tsv'))
             vfdb_filtered = Path(str(self.output_file_VFDB).replace('.tsv', '_filtered.tsv'))
-            
+            ICE_filtered = Path(str(self.output_file_ICE).replace('.tsv', '_filtered.tsv'))
+
             if istnin_filtered.exists():
-                self.add_genome_locations(
+                self.add_location(
                     istnin_filtered,
-                    prokka_gff,
-                    self.outdir / 'ISTnIN_filtered_with_locations.tsv',
-                    is_istnin=True  # Mark as ISTnIN result
+                    self.outdir / 'ISTnIN_filtered_with_locations.tsv'
                 )
             
             if resfinder_filtered.exists():
                 self.add_genome_locations(
                     resfinder_filtered,
                     prokka_gff,
-                    self.outdir / 'RESfinder_filtered_with_locations.tsv',
-                    is_istnin=False
+                    self.outdir / 'RESfinder_filtered_with_locations.tsv'
                 )
             
             if vfdb_filtered.exists():
                 self.add_genome_locations(
                     vfdb_filtered,
                     prokka_gff,
-                    self.outdir / 'VFDB_filtered_with_locations.tsv',
-                    is_istnin=False
+                    self.outdir / 'VFDB_filtered_with_locations.tsv'
+                )
+            
+            if ICE_filtered.exists():
+                self.add_location(
+                    ICE_filtered,
+                    self.outdir / 'ICE_filtered_with_locations.tsv'
                 )
         else:
             print("Error: Prokka output files not found")
@@ -953,6 +963,54 @@ class GenomeAnalyzer:
             print(f"Error parsing Platon JSON file: {e}")
             return None
 
+    def add_location(self, input_file, output_file, is_istnin=False):
+        """Add columns to ICE_filtered.tsv and ISTnIN_filtered.tsv"""
+        # Read the input file
+        df = pd.read_csv(input_file, sep='\t')
+        
+        # Add new columns
+        df['contig'] = df['query_id']
+        df['genome_start'] = df['query_start']
+        df['genome_end'] = df['query_end']
+        df['strand'] = ''
+        
+        # Reorder columns
+        columns = list(df.columns)
+        insert_index = columns.index('subject_coverage') + 1
+        new_columns = columns[:insert_index] + ['contig', 'genome_start', 'genome_end', 'strand'] + columns[insert_index:]
+        df = df[new_columns]
+
+        # Add type marker if ISTnIN result
+        if is_istnin:
+            def get_element_type(subject_id):
+                if 'ISFinder' in subject_id:
+                    return 'IS'
+                elif 'INTEGRALL' in subject_id:
+                    return 'IN'
+                else:
+                    return 'Tn'
+            
+            df['element_type'] = df['subject_id'].apply(get_element_type)
+            
+            # Update column order to include element_type
+            columns = [
+                'query_id', 'subject_id', 'identity', 'alignment_length',
+                'query_start', 'query_end', 'query_coverage', 'subject_coverage',
+                'contig', 'genome_start', 'genome_end', 'strand',
+                'evalue', 'bit_score', 'element_type'
+            ]
+        else:
+            columns = [
+                'query_id', 'subject_id', 'identity', 'alignment_length',
+                'query_start', 'query_end', 'query_coverage', 'subject_coverage',
+                'contig', 'genome_start', 'genome_end', 'strand',
+                'evalue', 'bit_score'
+            ]
+        
+        # Save the updated DataFrame to the output file
+        df.to_csv(output_file, sep='\t', index=False)
+        print(f"Updated tsv saved to: {output_file}")
+
 def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Genome analysis pipeline')
@@ -972,4 +1030,3 @@ def main():
 
 if __name__ == "__main__":
     main()
- 
