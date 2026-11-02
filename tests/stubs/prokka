@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""prokka 的测试替身（stub）。
+
+只实现 respt 依赖的部分: 依据规格文件 ``$RESPT_STUB_SPEC_DIR/prokka_spec.tsv``
+生成 ``.gff`` / ``.ffn`` / ``.fna`` / ``.gbk`` 四个产物。
+命令行与真实 prokka 兼容: ``prokka <input> --outdir DIR --prefix P --force --cpus N``
+
+刻意在 GFF 末尾附加 ``##FASTA`` 段（Prokka 的真实行为），用于验证解析器
+是否会在该处提前停止；同时用百分号编码写入 gene 属性，用于验证 unquote。
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+from pathlib import Path
+from urllib.parse import quote
+
+from Bio import SeqIO
+from Bio.Seq import Seq
+
+
+def parse_args(argv):
+    opts = {"input": None, "outdir": ".", "prefix": "out", "cpus": "1"}
+    positional = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--outdir":
+            opts["outdir"] = argv[i + 1]; i += 2
+        elif arg == "--prefix":
+            opts["prefix"] = argv[i + 1]; i += 2
+        elif arg == "--cpus":
+            opts["cpus"] = argv[i + 1]; i += 2
+        elif arg in ("--force", "--quiet", "--compliant"):
+            i += 1
+        elif arg.startswith("--"):
+            i += 2 if (i + 1 < len(argv) and not argv[i + 1].startswith("--")) else 1
+        else:
+            positional.append(arg); i += 1
+    if positional:
+        opts["input"] = positional[0]
+    return opts
+
+
+def main() -> int:
+    opts = parse_args(sys.argv[1:])
+    spec_dir = os.environ.get("RESPT_STUB_SPEC_DIR")
+    if not spec_dir:
+        print("prokka-stub: 缺少环境变量 RESPT_STUB_SPEC_DIR", file=sys.stderr)
+        return 2
+    if not opts["input"]:
+        print("prokka-stub: 缺少输入文件", file=sys.stderr)
+        return 2
+
+    spec_path = Path(spec_dir) / "prokka_spec.tsv"
+    outdir = Path(opts["outdir"])
+    outdir.mkdir(parents=True, exist_ok=True)
+    prefix = opts["prefix"]
+
+    genome = {}
+    order = []
+    for record in SeqIO.parse(opts["input"], "fasta"):
+        genome[record.id] = record.seq
+        order.append(record.id)
+
+    rows = []
+    with open(spec_path, encoding="utf-8") as handle:
+        header = handle.readline()
+        for line in handle:
+            if not line.strip():
+                continue
+            gene_id, contig, start, end, strand, gene = line.rstrip("\n").split("\t")
+            rows.append((gene_id, contig, int(start), int(end), strand, gene))
+
+    # .fna 原样拷贝
+    shutil.copyfile(opts["input"], outdir / f"{prefix}.fna")
+
+    # .ffn = 各 CDS 的核酸序列
+    with open(outdir / f"{prefix}.ffn", "w", encoding="utf-8") as handle:
+        for gene_id, contig, start, end, strand, gene in rows:
+            seq = genome[contig][start - 1:end]
+            if strand == "-":
+                seq = seq.reverse_complement()
+            handle.write(f">{gene_id} {gene}\n")
+            for i in range(0, len(seq), 60):
+                handle.write(str(seq[i:i + 60]) + "\n")
+
+    # .faa = 翻译（respt 不使用，仅为贴近真实产物的完整性）
+    with open(outdir / f"{prefix}.faa", "w", encoding="utf-8") as handle:
+        for gene_id, contig, start, end, strand, gene in rows:
+            seq = genome[contig][start - 1:end]
+            if strand == "-":
+                seq = seq.reverse_complement()
+            handle.write(f">{gene_id} {gene}\n{seq.translate(to_stop=True)}\n")
+
+    # .gff
+    with open(outdir / f"{prefix}.gff", "w", encoding="utf-8") as handle:
+        handle.write("##gff-version 3\n")
+        for contig in order:
+            handle.write(f"##sequence-region {contig} 1 {len(genome[contig])}\n")
+        for gene_id, contig, start, end, strand, gene in rows:
+            attributes = (
+                f"ID={gene_id};gene={quote(gene)};locus_tag={gene_id};"
+                f"product={quote(gene + ' (stub)')}"
+            )
+            handle.write(
+                f"{contig}\tProdigal:002006\tCDS\t{start}\t{end}\t.\t{strand}\t0\t{attributes}\n"
+            )
+        # Prokka 会把整段基因组附在 GFF 末尾
+        handle.write("##FASTA\n")
+        for contig in order:
+            handle.write(f">{contig}\n")
+            seq = genome[contig]
+            for i in range(0, len(seq), 60):
+                handle.write(str(seq[i:i + 60]) + "\n")
+
+    with open(outdir / f"{prefix}.gbk", "w", encoding="utf-8") as handle:
+        handle.write(f"LOCUS       {prefix} {sum(len(genome[c]) for c in order)} bp DNA\n")
+        handle.write("//\n")
+
+    print(f"prokka-stub: 写出 {len(rows)} 个 CDS -> {outdir}/{prefix}.*")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

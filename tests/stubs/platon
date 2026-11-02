@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""platon 的测试替身（stub）：按规格写出 ``<prefix>.json``。
+
+命令行与真实 platon 兼容: ``platon <genome> --db DIR --output DIR --prefix P --threads N``
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def parse_args(argv):
+    opts = {"input": None, "output": ".", "prefix": "out", "db": "", "threads": "1"}
+    positional = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("--db", "--output", "--prefix", "--threads"):
+            key = {"--db": "db", "--output": "output", "--prefix": "prefix",
+                   "--threads": "threads"}[arg]
+            opts[key] = argv[i + 1]
+            i += 2
+        elif arg.startswith("--"):
+            i += 1
+        else:
+            positional.append(arg)
+            i += 1
+    if positional:
+        opts["input"] = positional[0]
+    return opts
+
+
+def main() -> int:
+    opts = parse_args(sys.argv[1:])
+    spec_dir = os.environ.get("RESPT_STUB_SPEC_DIR")
+    if not spec_dir:
+        print("platon-stub: 缺少环境变量 RESPT_STUB_SPEC_DIR", file=sys.stderr)
+        return 2
+
+    spec_path = Path(spec_dir) / "platon_spec.json"
+    data = json.loads(spec_path.read_text(encoding="utf-8"))
+
+    outdir = Path(opts["output"])
+    outdir.mkdir(parents=True, exist_ok=True)
+    prefix = opts["prefix"]
+    (outdir / f"{prefix}.json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    # 真实 platon 还会写一份 TSV 摘要，这里一并生成以贴近真实产物
+    with open(outdir / f"{prefix}.tsv", "w", encoding="utf-8") as handle:
+        handle.write("contig_id\tlength\tgc\tcoverage\tcircular\tplasmid_probability\n")
+        for contig_id, info in data.items():
+            handle.write(
+                f"{contig_id}\t{info.get('length', '')}\t{info.get('gc', '')}\t"
+                f"{info.get('coverage', '')}\t{info.get('circular', '')}\t"
+                f"{info.get('plasmid_probability', '')}\n"
+            )
+
+    print(f"platon-stub: 写出 {len(data)} 条 contig 的预测 -> {outdir}/{prefix}.json")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

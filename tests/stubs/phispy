@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""PhiSpy 的测试替身（stub）：按规格写出 ``<prefix>_prophage_coordinates.tsv``。
+
+命令行与真实 phispy 兼容: ``phispy <gbk> -o DIR -p P --threads N``
+输出为 11 列、无表头，与真实 PhiSpy 的 ``prophage_coordinates.tsv`` 一致。
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+def parse_args(argv):
+    opts = {"input": None, "output": ".", "prefix": "out", "threads": "1"}
+    positional = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-o", "--output"):
+            opts["output"] = argv[i + 1]; i += 2
+        elif arg in ("-p", "--prefix"):
+            opts["prefix"] = argv[i + 1]; i += 2
+        elif arg in ("--threads", "-t"):
+            opts["threads"] = argv[i + 1]; i += 2
+        elif arg.startswith("-"):
+            i += 1
+        else:
+            positional.append(arg); i += 1
+    if positional:
+        opts["input"] = positional[0]
+    return opts
+
+
+def main() -> int:
+    opts = parse_args(sys.argv[1:])
+    spec_dir = os.environ.get("RESPT_STUB_SPEC_DIR")
+    if not spec_dir:
+        print("phispy-stub: 缺少环境变量 RESPT_STUB_SPEC_DIR", file=sys.stderr)
+        return 2
+
+    spec_path = Path(spec_dir) / "phispy_spec.tsv"
+    outdir = Path(opts["output"])
+    outdir.mkdir(parents=True, exist_ok=True)
+    prefix = opts["prefix"]
+
+    rows = []
+    if spec_path.exists():
+        for line in spec_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            contig, start, end, number = line.split("\t")
+            rows.append((number, contig, start, end))
+
+    target = outdir / f"{prefix}_prophage_coordinates.tsv"
+    with open(target, "w", encoding="utf-8") as handle:
+        for number, contig, start, end in rows:
+            fields = [
+                number, contig, start, end,
+                "", "", "", "",
+                "", "", "stub prediction",
+            ]
+            handle.write("\t".join(fields) + "\n")
+
+    print(f"phispy-stub: 写出 {len(rows)} 个前噬菌体 -> {target}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

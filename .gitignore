@@ -1,0 +1,28 @@
+# ---- 大型数据库（体积过大，不入库；由 README 中的下载说明获取）----
+platon/
+ICE/
+ISTnIN/
+RESfinder/
+VFDB/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# ---- 运行产物与日志 ----
+*.log
+*_summary.json
+results/
+output/
+tmp/
+.directory
+
+# ---- 编辑器/系统 ----
+.DS_Store
+*.swp
+.idea/
+.vscode/
